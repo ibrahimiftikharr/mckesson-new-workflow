@@ -19,20 +19,74 @@
     RETRY_BASE_DELAY_MS=750
     START_INDEX=1
     END_INDEX=0
+
+  Optional CLI args (override env vars):
+    --start_line 1 --end_line 5000
+    --input_file shopify_variants.json
+    --output_file results_1_5000.jsonl
+    --log_file logs_1_5000.log
+    --batch_size 100
+
+  Also supports positional range args:
+    node enrich_variants_with_specs.js 1 5000
 */
 
 const fs = require("fs");
 const path = require("path");
 
-const INPUT_FILE = process.env.INPUT_FILE || "shopify_variants.json";
-const OUTPUT_FILE = process.env.OUTPUT_FILE || "shopify_variants_with_specs.jsonl";
-const LOG_FILE = process.env.LOG_FILE || "specs_enrichment.log";
-const BATCH_SIZE = Number(process.env.BATCH_SIZE || 100);
-const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 20000);
-const MAX_RETRIES = Number(process.env.MAX_RETRIES || 3);
-const RETRY_BASE_DELAY_MS = Number(process.env.RETRY_BASE_DELAY_MS || 750);
-const START_INDEX = Number(process.env.START_INDEX || 1);
-const END_INDEX = Number(process.env.END_INDEX || 0);
+function parseCliArgs(argv) {
+  const args = {};
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!token.startsWith("--")) continue;
+
+    const key = token.slice(2);
+    const next = argv[i + 1];
+    if (!next || next.startsWith("--")) {
+      args[key] = true;
+      continue;
+    }
+
+    args[key] = next;
+    i += 1;
+  }
+
+  const positional = argv.filter((v) => !v.startsWith("--"));
+  if (!args.start_line && positional[0]) args.start_line = positional[0];
+  if (!args.end_line && positional[1]) args.end_line = positional[1];
+
+  return args;
+}
+
+const cli = parseCliArgs(process.argv.slice(2));
+const hasRangeArgs =
+  Object.prototype.hasOwnProperty.call(cli, "start_line") ||
+  Object.prototype.hasOwnProperty.call(cli, "end_line");
+
+const INPUT_FILE = String(cli.input_file || process.env.INPUT_FILE || "shopify_variants.json");
+const BATCH_SIZE = Number(cli.batch_size || process.env.BATCH_SIZE || 100);
+const REQUEST_TIMEOUT_MS = Number(cli.request_timeout_ms || process.env.REQUEST_TIMEOUT_MS || 20000);
+const MAX_RETRIES = Number(cli.max_retries || process.env.MAX_RETRIES || 3);
+const RETRY_BASE_DELAY_MS = Number(cli.retry_base_delay_ms || process.env.RETRY_BASE_DELAY_MS || 750);
+const START_INDEX = Number(cli.start_line || process.env.START_INDEX || process.env.START_LINE || 1);
+const END_INDEX = Number(cli.end_line || process.env.END_INDEX || process.env.END_LINE || 0);
+
+const defaultOutputFile = END_INDEX > 0
+  ? `results_${START_INDEX}_${END_INDEX}.jsonl`
+  : `results_${START_INDEX}_end.jsonl`;
+const defaultLogFile = END_INDEX > 0
+  ? `logs_${START_INDEX}_${END_INDEX}.log`
+  : `logs_${START_INDEX}_end.log`;
+
+const OUTPUT_FILE = String(
+  cli.output_file ||
+    (hasRangeArgs ? defaultOutputFile : (process.env.OUTPUT_FILE || defaultOutputFile))
+);
+const LOG_FILE = String(
+  cli.log_file ||
+    (hasRangeArgs ? defaultLogFile : (process.env.LOG_FILE || defaultLogFile))
+);
 
 const EXCLUDED_KEYS = new Set([
   "McKesson #",
@@ -207,6 +261,13 @@ function loadVariants(inputPath) {
 }
 
 async function main() {
+  if (!Number.isInteger(START_INDEX) || START_INDEX < 1) {
+    throw new Error("start_line must be an integer >= 1");
+  }
+  if (!Number.isInteger(END_INDEX) || END_INDEX < 0) {
+    throw new Error("end_line must be an integer >= 0");
+  }
+
   const cwd = process.cwd();
   const inputPath = path.join(cwd, INPUT_FILE);
   const outputPath = path.join(cwd, OUTPUT_FILE);
@@ -288,6 +349,7 @@ async function main() {
   console.log(
     JSON.stringify(
       {
+        mode: "range",
         inputFile: INPUT_FILE,
         outputFile: OUTPUT_FILE,
         logFile: LOG_FILE,

@@ -1,0 +1,2 @@
+OUT=.\\enrich_stdout_20260330_162934.txt
+ERR=.\\enrich_stderr_20260330_162934.txt
